@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LEG Graph (No Libraries)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+
+        #graph {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: #f4f4f4;
+        }
+
+        .node {
+            position: absolute;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: move;
+            user-select: none;
+            text-align: center;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .lag {
+            background-color: #6a994e;
+            /* vàng */
+        }
+
+        .diff {
+            background-color: #9ccc65;
+            /* xanh dương */
+        }
+
+        .final {
+            background-color: #386641;
+            /* tím */
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+
+        .legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 20;
+        }
+
+        .legend div {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .legend span {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 8px;
+            border-radius: 4px;
+        }
+
+        .legend button {
+            margin-top: 8px;
+            padding: 6px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid #aaa;
+            border-radius: 4px;
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="graph">
+        <div class="legend">
+            <div><span style="background:#6a994e"></span>Input Layer</div>
+            <div><span style="background:#9ccc65"></span>Hidden Layer</div>
+            <div><span style="background:#386641"></span>Output Layer</div>
+            <button onclick="resetLayout()">🔄 Reset Layout</button>
+        </div>
+        <canvas id="linkLayer"></canvas>
+    </div>
+
+    <script>
+        const data = {{LED_DATA}};
+
+        const graph = document.getElementById("graph");
+        const canvas = document.getElementById("linkLayer");
+        const ctx = canvas.getContext("2d");
+
+        const nodes = {};
+        const positions = {};
+        const edges = [];
+
+        const allNodes = new Set();
+        for (let target in data) {
+            allNodes.add(target);
+            data[target].forEach(({ feature, weight }) => {
+                allNodes.add(feature);
+                edges.push({ from: feature, to: target, weight });
+            });
+        }
+
+        const layers = {
+            lag: [],
+            diff: [],
+            final: []
+        };
+
+        allNodes.forEach(id => {
+            if (id.startsWith("lag")) {
+                layers.lag.push(id);
+            } else if (
+                id.includes("dir") || id.includes("diff") || id.includes("imf")
+            ) {
+                layers.diff.push(id);
+            } else {
+                layers.final.push(id);
+            }
+        });
+
+        function createNode(id, x, y, className) {
+            const div = document.createElement("div");
+            div.className = "node " + className;
+            div.innerText = id;
+            div.style.left = `${x}px`;
+            div.style.top = `${y}px`;
+            div.setAttribute("data-id", id);
+            graph.appendChild(div);
+
+            nodes[id] = div;
+            positions[id] = { x, y };
+
+            makeDraggable(div);
+        }
+
+        function layoutHorizontally(ids, y, className) {
+            const graphWidth = graph.clientWidth;
+            const spacing = graphWidth / (ids.length + 1);
+            ids.forEach((id, i) => {
+                const x = (i + 1) * spacing;
+                createNode(id, x, y, className);
+            });
+        }
+        
+        // Layout theo tầng với vị trí y hợp lý hơn
+        layoutHorizontally(layers.final, 100, 'final');
+        layoutHorizontally(layers.diff, 300, 'diff');
+        layoutHorizontally(layers.lag, 500, 'lag');
+
+        function drawEdges() {
+            canvas.width = graph.clientWidth;
+            canvas.height = graph.clientHeight;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "12px sans-serif";
+
+            edges.forEach(({ from, to, weight }) => {
+                const fromEl = nodes[from];
+                const toEl = nodes[to];
+                if (!fromEl || !toEl) return;
+
+                const fromRect = fromEl.getBoundingClientRect();
+                const toRect = toEl.getBoundingClientRect();
+                const gRect = graph.getBoundingClientRect();
+
+                const x1 = fromRect.left + fromRect.width / 2 - gRect.left;
+                const y1 = fromRect.top + fromRect.height / 2 - gRect.top;
+                const x2 = toRect.left + toRect.width / 2 - gRect.left;
+                const y2 = toRect.top + toRect.height / 2 - gRect.top;
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = weight >= 0 ? "blue" : "red";
+                ctx.lineWidth = Math.max(Math.abs(weight * 20), 1);
+                ctx.stroke();
+
+                const midX = (x1 + x2) / 2;
+                const midY = (y1 + y2) / 2;
+                ctx.fillStyle = "#000";
+                ctx.fillText(weight.toFixed(4), midX + 5, midY - 5);
+            });
+        }
+
+        function makeDraggable(el) {
+            let offsetX, offsetY, dragging = false;
+
+            el.addEventListener("mousedown", e => {
+                dragging = true;
+                offsetX = e.offsetX;
+                offsetY = e.offsetY;
+                el.style.zIndex = 10;
+            });
+
+            window.addEventListener("mousemove", e => {
+                if (!dragging) return;
+                el.style.left = (e.pageX - offsetX) + "px";
+                el.style.top = (e.pageY - offsetY) + "px";
+                drawEdges();
+            });
+
+            window.addEventListener("mouseup", () => {
+                dragging = false;
+                el.style.zIndex = 1;
+            });
+        }
+
+        function resetLayout() {
+            const clearNodes = [...document.querySelectorAll(".node")];
+            clearNodes.forEach(n => n.remove());
+
+            layoutHorizontally(layers.final, 100, 'final');
+            layoutHorizontally(layers.diff, 300, 'diff');
+            layoutHorizontally(layers.lag, 500, 'lag');
+            drawEdges();
+        }
+
+        drawEdges();
+    </script>
+</body>
+
+</html>
